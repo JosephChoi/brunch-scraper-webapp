@@ -1,6 +1,4 @@
 {
-  "buildCommand": "npm run build",
-  "installCommand": "npm install && npx playwright-chromium install chromium",
   "functions": {
     "src/app/api/scrape/route.ts": {
       "maxDuration": 300,

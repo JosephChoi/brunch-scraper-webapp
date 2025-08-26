@@ -28,6 +28,10 @@ export interface ScrapeConfig {
   startNum: number;
   /** 종료 글 번호 */
   endNum: number;
+  /** Puppeteer용 시작 글 번호 */
+  startNumber: number;
+  /** Puppeteer용 종료 글 번호 */
+  endNumber: number;
   /** 진행 상황 콜백 함수 */
   onProgress?: (current: number, total: number, url: string, title?: string) => void;
 }
@@ -65,6 +69,40 @@ export interface ScrapeResult {
   /** 총 처리 시간 (밀리초) */
   processingTime?: number;
 }
+
+/**
+ * Puppeteer 스크래핑 결과 타입 (Generator용)
+ */
+export type PuppeteerScrapeResult = 
+  | {
+      type: 'progress';
+      data: {
+        current: number;
+        total: number;
+        percentage: number;
+        currentArticle: number;
+        status: string;
+      };
+    }
+  | {
+      type: 'complete';
+      data: {
+        articles: ArticleData[];
+        summary: {
+          total: number;
+          success: number;
+          failed: number;
+          errors: string[];
+        };
+      };
+    }
+  | {
+      type: 'error';
+      data: {
+        message: string;
+        code: string;
+      };
+    };
 
 // ===== API 응답 타입 =====
 
@@ -302,6 +340,12 @@ export interface ScrapingSettings {
   maxRetries: number;
   /** User-Agent 문자열 */
   userAgent: string;
+  /** 요청 간격 (백워드 호환) */
+  delayBetweenRequests: number;
+  /** 페이지 대기 시간 */
+  waitTimeout: number;
+  /** 헤드리스 모드 */
+  headless: boolean;
 }
 
 /**
@@ -311,7 +355,10 @@ export const DEFAULT_SCRAPING_SETTINGS: ScrapingSettings = {
   requestDelay: 2500, // 2.5초
   timeout: 30000, // 30초
   maxRetries: 3,
-  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  delayBetweenRequests: 2500,
+  waitTimeout: 10000,
+  headless: true,
 };
 
 // ===== 유틸리티 타입 =====

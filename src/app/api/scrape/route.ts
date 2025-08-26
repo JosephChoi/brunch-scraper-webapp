@@ -1,5 +1,5 @@
 /**
- * 브런치 텍스트 수집기 - 스크래핑 API Route
+ * 브런치 텍스트 수집기 - Puppeteer 기반 스크래핑 API Route
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -15,10 +15,7 @@ import {
   validateScrapeRequest,
   toValidationResponse,
 } from '@/lib/validator';
-import {
-  scrapeMultipleArticles,
-  checkBrunchAccessibility,
-} from '@/lib/scraper';
+import { createScraper } from '@/lib/scraper-puppeteer';
 import {
   processArticlesForDownload,
   generateTextFilename,
@@ -28,74 +25,38 @@ import {
   getErrorMessage,
   devLog,
 } from '@/lib/utils';
-import {
-  HTTP_STATUS,
-  ERROR_CODES,
-  ERROR_MESSAGES,
-  RATE_LIMIT_PER_MINUTE,
-  RATE_LIMIT_WINDOW_MS,
-  RATE_LIMIT_RETRY_AFTER,
-} from '@/lib/constants';
 
-// ===== Rate Limiting 관리 =====
+// ===== 상수 정의 =====
 
-interface RateLimitInfo {
-  count: number;
-  resetTime: number;
-}
+const HTTP_STATUS = {
+  OK: 200,
+  BAD_REQUEST: 400,
+  TOO_MANY_REQUESTS: 429,
+  INTERNAL_SERVER_ERROR: 500,
+} as const;
 
-// 메모리 기반 Rate Limiting (실제 운영환경에서는 Redis 등 사용 권장)
-const rateLimitMap = new Map<string, RateLimitInfo>();
+const ERROR_CODES = {
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  NETWORK_ERROR: 'NETWORK_ERROR',
+  SCRAPING_ERROR: 'SCRAPING_ERROR',
+  PROCESSING_ERROR: 'PROCESSING_ERROR',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
 
-/**
- * Rate Limiting을 확인합니다.
- * @param clientId 클라이언트 식별자 (IP 주소)
- * @returns Rate Limit 상태
- */
-function checkRateLimit(clientId: string): {
-  allowed: boolean;
-  resetTime?: number;
-  remainingRequests?: number;
-} {
-  const now = Date.now();
-  const currentInfo = rateLimitMap.get(clientId);
+const ERROR_MESSAGES = {
+  [ERROR_CODES.VALIDATION_ERROR]: '입력 데이터가 올바르지 않습니다.',
+  [ERROR_CODES.NETWORK_ERROR]: '네트워크 연결에 문제가 있습니다.',
+  [ERROR_CODES.SCRAPING_ERROR]: '웹 페이지 수집 중 오류가 발생했습니다.',
+  [ERROR_CODES.PROCESSING_ERROR]: '데이터 처리 중 오류가 발생했습니다.',
+  [ERROR_CODES.INTERNAL_ERROR]: '서버 내부 오류가 발생했습니다.',
+} as const;
 
-  // 기존 정보가 없거나 윈도우가 만료된 경우
-  if (!currentInfo || now > currentInfo.resetTime) {
-    const newInfo: RateLimitInfo = {
-      count: 1,
-      resetTime: now + RATE_LIMIT_WINDOW_MS,
-    };
-    rateLimitMap.set(clientId, newInfo);
-    
-    return {
-      allowed: true,
-      remainingRequests: RATE_LIMIT_PER_MINUTE - 1,
-    };
-  }
-
-  // 제한 확인
-  if (currentInfo.count >= RATE_LIMIT_PER_MINUTE) {
-    return {
-      allowed: false,
-      resetTime: currentInfo.resetTime,
-    };
-  }
-
-  // 카운트 증가
-  currentInfo.count++;
-  rateLimitMap.set(clientId, currentInfo);
-
-  return {
-    allowed: true,
-    remainingRequests: RATE_LIMIT_PER_MINUTE - currentInfo.count,
-  };
-}
+// ===== IP 주소 추출 =====
 
 /**
  * 클라이언트 IP 주소를 추출합니다.
- * @param request Next.js Request 객체
- * @returns IP 주소
+ * @param request NextRequest 객체
+ * @returns 클라이언트 IP 주소
  */
 function getClientIP(request: NextRequest): string {
   // Vercel의 경우
@@ -185,8 +146,9 @@ function createStreamingResponse(
   });
 
   return new NextResponse(stream, {
+    status: HTTP_STATUS.OK,
     headers: {
-      'Content-Type': 'text/event-stream',
+      'Content-Type': 'application/json',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'Access-Control-Allow-Origin': '*',
@@ -196,60 +158,35 @@ function createStreamingResponse(
   });
 }
 
-// ===== API Route 핸들러들 =====
+// ===== API 핸들러 =====
 
 /**
- * POST /api/scrape
- * 브런치 글 스크래핑을 수행합니다.
+ * OPTIONS 메서드 핸들러 (CORS Preflight)
  */
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: HTTP_STATUS.OK,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
+}
+
+/**
+ * POST 메서드 핸들러 - 스크래핑 요청 처리
+ */
+export async function POST(request: NextRequest) {
+  const clientIP = getClientIP(request);
+  devLog(`스크래핑 요청 시작 - IP: ${clientIP}`);
+
   try {
-    devLog('스크래핑 요청 받음');
-
-    // Rate Limiting 확인
-    const clientIP = getClientIP(request);
-    const rateLimitResult = checkRateLimit(clientIP);
-
-    if (!rateLimitResult.allowed) {
-      const errorResponse: ErrorResponse = {
-        type: 'error',
-        error: ERROR_CODES.RATE_LIMIT_EXCEEDED,
-        message: ERROR_MESSAGES[ERROR_CODES.RATE_LIMIT_EXCEEDED],
-        retryAfter: RATE_LIMIT_RETRY_AFTER,
-        timestamp: getCurrentTimestamp(),
-      };
-
-      return NextResponse.json(errorResponse, {
-        status: HTTP_STATUS.TOO_MANY_REQUESTS,
-        headers: {
-          'Retry-After': RATE_LIMIT_RETRY_AFTER.toString(),
-          'X-RateLimit-Limit': RATE_LIMIT_PER_MINUTE.toString(),
-          'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': rateLimitResult.resetTime?.toString() || '',
-        },
-      });
-    }
-
     // 요청 본문 파싱
-    let requestBody: ScrapeRequest;
-    try {
-      requestBody = await request.json();
-    } catch (error) {
-      const errorResponse: ErrorResponse = {
-        type: 'error',
-        error: ERROR_CODES.VALIDATION_ERROR,
-        message: '잘못된 JSON 형식입니다.',
-        details: getErrorMessage(error),
-        timestamp: getCurrentTimestamp(),
-      };
+    const requestBody: ScrapeRequest = await request.json();
+    devLog('요청 데이터:', JSON.stringify(requestBody, null, 2));
 
-      return NextResponse.json(errorResponse, {
-        status: HTTP_STATUS.BAD_REQUEST,
-      });
-    }
-
-    // 입력값 검증
-    devLog('요청 본문:', JSON.stringify(requestBody, null, 2));
+    // 입력 검증
     const validation = validateScrapeRequest(requestBody);
     devLog('검증 결과:', JSON.stringify(validation, null, 2));
     
@@ -263,116 +200,91 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const { authorId, baseUrl, startNum, endNum } = validation.parsed!;
 
-    // 브런치 접근 가능성 사전 확인
-    devLog('브런치 접근성 확인 중...');
-    const accessibilityCheck = await checkBrunchAccessibility();
-    if (!accessibilityCheck.accessible) {
-      const errorResponse: ErrorResponse = {
-        type: 'error',
-        error: ERROR_CODES.NETWORK_ERROR,
-        message: '브런치 사이트에 접근할 수 없습니다.',
-        details: accessibilityCheck.error,
-        timestamp: getCurrentTimestamp(),
-      };
-
-      return NextResponse.json(errorResponse, {
-        status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
-      });
-    }
-
     // 스트리밍 응답 시작
     return createStreamingResponse(async (writer) => {
-
       // 스크래핑 설정
       const scrapeConfig: ScrapeConfig = {
         baseUrl,
         authorId,
         startNum,
         endNum,
-        onProgress: async (current: number, total: number, url: string, title?: string) => {
-          const progressResponse: ProgressResponse = {
-            type: 'progress',
-            current,
-            total,
-            url,
-            title,
-            timestamp: getCurrentTimestamp(),
-          };
-
-          await writer.write(progressResponse);
-          devLog(`진행 상황: ${current}/${total} - ${url}`);
-        },
+        startNumber: startNum,
+        endNumber: endNum,
       };
 
+      devLog(`Puppeteer 스크래핑 시작: ${authorId}, ${startNum}-${endNum}`);
+
+      // Puppeteer 스크래퍼 생성
+      const scraper = createScraper();
+
       try {
-        devLog(`스크래핑 시작: ${authorId}, ${startNum}-${endNum}`);
+        // 스크래핑 실행 (Generator 방식)
+        for await (const result of scraper.scrapeArticles(scrapeConfig)) {
+          if (result.type === 'progress') {
+            const progressResponse: ProgressResponse = {
+              type: 'progress',
+              current: result.data.current,
+              total: result.data.total,
+              url: `${baseUrl}/${result.data.currentArticle}`,
+              title: result.data.status,
+              timestamp: getCurrentTimestamp(),
+            };
+            await writer.write(progressResponse);
+            devLog(`진행 상황: ${result.data.current}/${result.data.total} - ${result.data.status}`);
 
-        // 스크래핑 실행
-        const scrapeResult = await scrapeMultipleArticles(scrapeConfig);
+          } else if (result.type === 'complete') {
+            devLog(`스크래핑 완료: ${result.data.articles.length}개 글 수집`);
 
-        if (!scrapeResult.success) {
-          const errorResponse: ErrorResponse = {
-            type: 'error',
-            error: ERROR_CODES.SCRAPING_ERROR,
-            message: ERROR_MESSAGES[ERROR_CODES.SCRAPING_ERROR],
-            details: scrapeResult.error,
-            timestamp: getCurrentTimestamp(),
-          };
-
-          await writer.write(errorResponse);
-          return;
-        }
-
-        if (!scrapeResult.data || scrapeResult.data.length === 0) {
-          const errorResponse: ErrorResponse = {
-            type: 'error',
-            error: ERROR_CODES.PROCESSING_ERROR,
-            message: '수집된 데이터가 없습니다.',
-            timestamp: getCurrentTimestamp(),
-          };
-
-          await writer.write(errorResponse);
-          return;
-        }
-
-        devLog(`스크래핑 완료: ${scrapeResult.data.length}개 글 수집`);
-
-        // 텍스트 처리
-        const processedText = processArticlesForDownload(
-          scrapeResult.data,
-          authorId,
-          startNum,
-          endNum
-        );
-
-        // 파일명 생성
-        const filename = generateTextFilename(authorId, startNum, endNum);
-
-        // 완료 응답 전송
-        const completeResponse: CompleteResponse = {
-          type: 'complete',
-          data: {
-            content: processedText.content,
-            filename,
-            metadata: {
-              totalArticles: scrapeResult.data.length,
-              successCount: processedText.metadata.successCount,
-              skippedCount: processedText.metadata.skippedCount,
-              skippedUrls: scrapeResult.skippedUrls || [],
-              generatedAt: processedText.metadata.generatedAt.toISOString(),
+            // 텍스트 처리
+            const processedText = processArticlesForDownload(
+              result.data.articles,
               authorId,
-              range: startNum === endNum ? `${startNum}` : `${startNum}-${endNum}`,
-            },
-          },
-          timestamp: getCurrentTimestamp(),
-        };
+              startNum,
+              endNum
+            );
 
-        await writer.write(completeResponse);
-        devLog('스크래핑 완료 응답 전송');
+            // 파일명 생성
+            const filename = generateTextFilename(authorId, startNum, endNum);
+
+            // 완료 응답 전송
+            const completeResponse: CompleteResponse = {
+              type: 'complete',
+              data: {
+                content: processedText.content,
+                filename,
+                metadata: {
+                  totalArticles: result.data.summary.total,
+                  successCount: result.data.summary.success,
+                  skippedCount: result.data.summary.failed,
+                  skippedUrls: result.data.summary.errors,
+                  generatedAt: getCurrentTimestamp(),
+                  authorId,
+                  range: `${startNum}-${endNum}`,
+                }
+              },
+              timestamp: getCurrentTimestamp(),
+            };
+
+            await writer.write(completeResponse);
+            devLog('스크래핑 및 전송 완료');
+            break;
+
+          } else if (result.type === 'error') {
+            const errorResponse: ErrorResponse = {
+              type: 'error',
+              error: ERROR_CODES.SCRAPING_ERROR,
+              message: result.data.message,
+              details: result.data.code,
+              timestamp: getCurrentTimestamp(),
+            };
+            await writer.write(errorResponse);
+            break;
+          }
+        }
 
       } catch (error) {
-        devLog('스크래핑 중 예외 발생:', error);
-
+        devLog('Puppeteer 스크래핑 중 오류:', error);
+        
         const errorResponse: ErrorResponse = {
           type: 'error',
           error: ERROR_CODES.INTERNAL_ERROR,
@@ -386,7 +298,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
   } catch (error) {
-    devLog('API Route 처리 중 예외:', error);
+    devLog('API 처리 중 오류:', error);
 
     const errorResponse: ErrorResponse = {
       type: 'error',
@@ -403,75 +315,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * OPTIONS /api/scrape
- * CORS preflight 요청 처리
+ * GET 메서드 핸들러 - Health Check
  */
-export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400', // 24시간
-    },
+export async function GET() {
+  return NextResponse.json({
+    status: 'healthy',
+    service: 'brunch-scraper-api',
+    timestamp: getCurrentTimestamp(),
   });
 }
-
-/**
- * GET /api/scrape
- * API 상태 확인 (헬스체크)
- */
-export async function GET(): Promise<NextResponse> {
-  try {
-    // 브런치 접근성 확인
-    const accessibilityCheck = await checkBrunchAccessibility();
-    
-    const status = {
-      service: 'Brunch Text Scraper API',
-      version: '1.0.0',
-      status: 'healthy',
-      timestamp: getCurrentTimestamp(),
-      brunchAccessible: accessibilityCheck.accessible,
-      brunchResponseTime: accessibilityCheck.responseTime,
-    };
-
-    if (!accessibilityCheck.accessible) {
-      status.status = 'degraded';
-    }
-
-    return NextResponse.json(status, {
-      status: HTTP_STATUS.OK,
-      headers: {
-        'Cache-Control': 'no-cache',
-      },
-    });
-
-  } catch (error) {
-    const errorStatus = {
-      service: 'Brunch Text Scraper API',
-      version: '1.0.0',
-      status: 'error',
-      timestamp: getCurrentTimestamp(),
-      error: getErrorMessage(error),
-    };
-
-    return NextResponse.json(errorStatus, {
-      status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
-    });
-  }
-}
-
-// ===== 정리 작업 =====
-
-// 주기적으로 만료된 Rate Limit 데이터 정리
-setInterval(() => {
-  const now = Date.now();
-  for (const [clientId, info] of rateLimitMap.entries()) {
-    if (now > info.resetTime) {
-      rateLimitMap.delete(clientId);
-    }
-  }
-}, RATE_LIMIT_WINDOW_MS);
-
-devLog('스크래핑 API Route 초기화 완료');

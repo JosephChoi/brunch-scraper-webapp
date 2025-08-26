@@ -208,6 +208,30 @@ export const PAGE_LOAD_TIMEOUT = 10000;
  */
 export const NETWORK_IDLE_TIMEOUT = 2000;
 
+// ===== 스크래핑 설정 객체 =====
+
+/**
+ * 기본 스크래핑 설정
+ */
+export const SCRAPING_SETTINGS = {
+  requestDelay: REQUEST_DELAY_MS,
+  timeout: REQUEST_TIMEOUT_MS,
+  maxRetries: MAX_RETRY_COUNT,
+  userAgent: DEFAULT_USER_AGENT,
+  delayBetweenRequests: REQUEST_DELAY_MS,
+  waitTimeout: PAGE_LOAD_TIMEOUT,
+  headless: true,
+} as const;
+
+/**
+ * 네트워크 설정
+ */
+export const NETWORK_SETTINGS = {
+  BROWSER_TIMEOUT: 60000,
+  PAGE_TIMEOUT: 30000,
+  NAVIGATION_TIMEOUT: 30000,
+} as const;
+
 // ===== API 관련 상수 =====
 
 /**
