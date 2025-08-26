@@ -6,7 +6,12 @@ const nextConfig: NextConfig = {
   
   // 이미지 최적화 설정
   images: {
-    domains: ['localhost'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'localhost',
+      },
+    ],
     formats: ['image/webp', 'image/avif'],
   },
   
@@ -25,15 +30,19 @@ const nextConfig: NextConfig = {
     ];
   },
   
-  // 서버 외부 패키지 설정 (Vercel에서 Playwright 최적화)
-  serverExternalPackages: ['playwright-chromium'],
+  // 서버 전용 패키지 설정 
+  serverExternalPackages: ['cheerio'],
   
-  // 웹팩 설정 (Vercel Playwright 지원)
-  webpack: (config: any) => {
-    config.externals = config.externals || [];
-    config.externals.push({
-      'playwright-chromium': 'commonjs playwright-chromium'
-    });
+  // 웹팩 설정으로 cheerio를 서버에서만 사용하도록 강제
+  webpack: (config: any, { isServer }: any) => {
+    if (!isServer) {
+      // 클라이언트 번들에서 cheerio 제외
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        cheerio: false,
+      };
+    }
+    
     return config;
   },
 };

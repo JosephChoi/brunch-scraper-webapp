@@ -1,217 +1,139 @@
 /**
- * 브런치 텍스트 수집기 - Playwright 스크래핑 엔진
+ * 브런치 텍스트 수집기 - HTTP + Cheerio 스크래핑 엔진
  */
 
-import { chromium, Browser, Page, BrowserContext } from 'playwright-chromium';
+import * as cheerio from 'cheerio';
 import {
   ScrapeConfig,
   ScrapeResult,
   ArticleData,
-  ScrapingSettings,
 } from './types';
 import { 
-  CSS_SELECTORS, 
-  SCRAPING_SETTINGS,
+  CSS_SELECTORS,
   NETWORK_SETTINGS 
 } from './constants';
 import { devLog } from './utils';
 
 /**
- * Playwright 기반 브런치 스크래퍼 클래스
+ * HTTP 기반 브런치 스크래퍼 클래스
  */
 export class BrunchScraper {
-  private browser: Browser | null = null;
-  private context: BrowserContext | null = null;
-  private settings: ScrapingSettings;
+  private headers: Record<string, string>;
 
-  constructor(settings: Partial<ScrapingSettings> = {}) {
-    this.settings = {
-      ...SCRAPING_SETTINGS,
-      ...settings,
+  constructor() {
+    this.headers = {
+      // 브런치의 로그인 리다이렉트를 우회하기 위해 Googlebot User-Agent 사용
+      'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
     };
   }
 
   /**
-   * 브라우저 초기화
+   * HTTP 요청으로 HTML 가져오기
    */
-  async initialize(): Promise<void> {
+  private async fetchHtml(url: string): Promise<string> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), NETWORK_SETTINGS.PAGE_TIMEOUT);
+
     try {
-      devLog('브라우저 초기화 시작...');
+      devLog(`HTTP 요청 시작: ${url}`);
+      
+      const response = await fetch(url, {
+        headers: this.headers,
+        signal: controller.signal,
+        redirect: 'follow',
+      });
 
-      // Vercel 환경에서 브라우저 실행 경로 명시적 설정
-      const launchOptions: any = {
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--memory-pressure-off',
-        ],
-        timeout: NETWORK_SETTINGS.BROWSER_TIMEOUT,
-      };
+      clearTimeout(timeoutId);
 
-      // Vercel 환경에서 브라우저 실행 경로 확인
-      if (process.env.VERCEL) {
-        devLog('Vercel 환경 감지 - 브라우저 경로 설정');
-        // Vercel에서 Playwright가 설치하는 기본 경로
-        const possiblePaths = [
-          '/tmp/.playwright/chromium-*/chrome-linux/chrome',
-          '/home/sbx_user1051/.cache/ms-playwright/chromium-*/chrome-linux/chrome',
-          '/vercel/.cache/ms-playwright/chromium-*/chrome-linux/chrome'
-        ];
-        
-        for (const path of possiblePaths) {
-          try {
-            // 와일드카드 경로 처리는 실제 구현에서는 더 복잡하지만 일단 시도
-            devLog(`브라우저 경로 확인 시도: ${path}`);
-          } catch (error) {
-            devLog(`경로 확인 실패: ${path}`, error);
-          }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const html = await response.text();
+      devLog(`HTML 수신 성공: ${html.length} bytes`);
+      
+      return html;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('요청 시간 초과');
+      }
+      
+      devLog(`HTTP 요청 실패: ${url}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cheerio로 HTML 파싱 및 데이터 추출
+   */
+  private parseArticleData(html: string, url: string): ArticleData | null {
+    try {
+      const $ = cheerio.load(html);
+
+      // 404 페이지 또는 존재하지 않는 글 확인
+      if ($('title').text().includes('404') || 
+          $('.error').length > 0 || 
+          $('body').text().includes('존재하지 않는')) {
+        devLog('404 페이지 감지');
+        return null;
+      }
+
+      // 제목 추출
+      let title = '';
+      const titleSelectors = [
+        CSS_SELECTORS.TITLE,
+        '.cover_title',
+        'h1.title',
+        'h1',
+        '.article-title',
+        'title'
+      ];
+
+      for (const selector of titleSelectors) {
+        const titleElement = $(selector).first();
+        if (titleElement.length && titleElement.text().trim()) {
+          title = titleElement.text().trim();
+          devLog(`제목 추출 성공 (${selector}):`, title);
+          break;
         }
       }
 
-      this.browser = await chromium.launch(launchOptions);
-
-      this.context = await this.browser.newContext({
-        userAgent: this.settings.userAgent,
-        viewport: { width: 1280, height: 800 },
-        ignoreHTTPSErrors: true,
-      });
-
-      devLog('브라우저 초기화 완료');
-    } catch (error) {
-      devLog('브라우저 초기화 실패:', error);
-      throw new Error(`브라우저 초기화에 실패했습니다: ${error}`);
-    }
-  }
-
-  /**
-   * 브라우저 정리
-   */
-  async cleanup(): Promise<void> {
-    if (this.context) {
-      try {
-        await this.context.close();
-        this.context = null;
-      } catch (error) {
-        devLog('컨텍스트 정리 중 오류:', error);
-      }
-    }
-
-    if (this.browser) {
-      try {
-        await this.browser.close();
-        this.browser = null;
-        devLog('브라우저 정리 완료');
-      } catch (error) {
-        devLog('브라우저 정리 중 오류:', error);
-      }
-    }
-  }
-
-  /**
-   * 새 페이지 생성
-   */
-  private async createPage(): Promise<Page> {
-    if (!this.context) {
-      throw new Error('브라우저 컨텍스트가 초기화되지 않았습니다');
-    }
-
-    const page = await this.context.newPage();
-    
-    // 타임아웃 설정
-    page.setDefaultTimeout(NETWORK_SETTINGS.PAGE_TIMEOUT);
-    page.setDefaultNavigationTimeout(NETWORK_SETTINGS.NAVIGATION_TIMEOUT);
-
-    return page;
-  }
-
-  /**
-   * 브런치 글 존재 여부 확인
-   */
-  async checkArticleExists(url: string): Promise<boolean> {
-    let page: Page | null = null;
-    
-    try {
-      devLog(`글 존재 확인: ${url}`);
-      page = await this.createPage();
-      
-      const response = await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: NETWORK_SETTINGS.NAVIGATION_TIMEOUT,
-      });
-
-      if (!response || response.status() !== 200) {
-        return false;
-      }
-
-      // 글 내용이 있는지 확인
-      const hasContent = await page.$(CSS_SELECTORS.CONTENT);
-      const exists = !!hasContent;
-      
-      devLog(`글 존재 여부: ${exists}`);
-      return exists;
-    } catch (error) {
-      devLog(`글 확인 실패: ${url}`, error);
-      return false;
-    } finally {
-      if (page) {
-        await page.close();
-      }
-    }
-  }
-
-  /**
-   * 단일 브런치 글 스크래핑
-   */
-  async scrapeArticle(url: string): Promise<ArticleData | null> {
-    let page: Page | null = null;
-    
-    try {
-      devLog(`글 스크래핑 시작: ${url}`);
-      page = await this.createPage();
-      
-      const response = await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: NETWORK_SETTINGS.NAVIGATION_TIMEOUT,
-      });
-
-      if (!response || response.status() !== 200) {
-        throw new Error(`페이지 로드 실패: HTTP ${response?.status()}`);
-      }
-
-      // 페이지 로딩 대기
-      await page.waitForSelector(CSS_SELECTORS.CONTENT, { 
-        timeout: this.settings.waitTimeout 
-      });
-
-      // 제목 추출
-      const titleElement = await page.$(CSS_SELECTORS.TITLE);
-      const title = titleElement 
-        ? await titleElement.textContent() || ''
-        : '';
-
-      if (!title.trim()) {
+      if (!title) {
         throw new Error('제목을 찾을 수 없습니다');
       }
 
       // 내용 추출
-      const contentElements = await page.$$(CSS_SELECTORS.CONTENT);
       let content = '';
-      
-      for (const element of contentElements) {
-        const text = await element.textContent() || '';
-        if (text.trim()) {
-          content += text.trim() + '\n\n';
+      const contentSelectors = [
+        CSS_SELECTORS.CONTENT,
+        '.wrap_body',
+        '.article-body',
+        '.content',
+        '.post-content',
+        'article .text'
+      ];
+
+      for (const selector of contentSelectors) {
+        const contentElements = $(selector);
+        if (contentElements.length > 0) {
+          contentElements.each((_, element) => {
+            const text = $(element).text().trim();
+            if (text) {
+              content += text + '\n\n';
+            }
+          });
+          
+          if (content.trim()) {
+            devLog(`내용 추출 성공 (${selector}): ${content.length} chars`);
+            break;
+          }
         }
       }
 
@@ -219,84 +141,164 @@ export class BrunchScraper {
         throw new Error('내용을 찾을 수 없습니다');
       }
 
-      // 작성일 추출
+      // 작성일 추출 (브런치 구조에 최적화된 셀렉터 순서)
       let publishedDate = '';
       const dateSelectors = [
-        '.cover_info .date', 
+        '[class*="date"]', // 브런치에서 .date 클래스 사용
+        '.cover_info .date',
         'time[datetime]',
         '.byline time',
-        '.article-meta time',
+        '.article-meta time', 
         '.article_info time',
         '.publish-date',
-        '[class*="date"]',
-        '[class*="time"]'
+        '[data-date]'
       ];
 
       for (const selector of dateSelectors) {
-        try {
-          const dateElement = await page.$(selector);
-          if (dateElement) {
-            // datetime 속성이 있으면 우선 사용
-            const datetime = await dateElement.getAttribute('datetime');
-            if (datetime) {
-              publishedDate = datetime;
-              devLog(`작성일 추출 성공 (${selector} datetime):`, publishedDate);
-              break;
-            }
-            
-            // 텍스트 내용에서 추출
-            const dateText = await dateElement.textContent() || '';
-            if (dateText.trim()) {
-              publishedDate = dateText.trim();
-              devLog(`작성일 추출 성공 (${selector} text):`, publishedDate);
-              break;
-            }
+        const dateElement = $(selector).first();
+        if (dateElement.length) {
+          // datetime 속성 우선 확인
+          const datetime = dateElement.attr('datetime');
+          if (datetime) {
+            publishedDate = datetime;
+            devLog(`작성일 추출 성공 (${selector} datetime):`, publishedDate);
+            break;
           }
-        } catch {
-          // 개별 셀렉터 오류는 무시하고 다음 시도
-          continue;
-        }
-      }
 
-      // 만약 여전히 찾지 못했다면 페이지 소스에서 직접 찾기
-      if (!publishedDate) {
-        const pageContent = await page.content();
-        const datePatterns = [
-          /"datePublished":\s*"([^"]+)"/,
-          /"publishDate":\s*"([^"]+)"/,
-          /data-publish-date="([^"]+)"/,
-          /datetime="([^"]+)"/
-        ];
-
-        for (const pattern of datePatterns) {
-          const match = pageContent.match(pattern);
-          if (match && match[1]) {
-            publishedDate = match[1];
-            devLog(`작성일 추출 성공 (패턴 매칭):`, publishedDate);
+          // data-date 속성 확인
+          const dataDate = dateElement.attr('data-date');
+          if (dataDate) {
+            publishedDate = dataDate;
+            devLog(`작성일 추출 성공 (${selector} data-date):`, publishedDate);
+            break;
+          }
+          
+          // 텍스트 내용에서 추출
+          const dateText = dateElement.text().trim();
+          if (dateText) {
+            publishedDate = dateText;
+            devLog(`작성일 추출 성공 (${selector} text):`, publishedDate);
             break;
           }
         }
       }
 
+      // JSON-LD에서 날짜 추출 시도 (우선순위 높음)
+      if (!publishedDate) {
+        $('script[type="application/ld+json"]').each((_, script) => {
+          try {
+            const jsonData = JSON.parse($(script).html() || '{}');
+            if (jsonData.datePublished) {
+              publishedDate = jsonData.datePublished;
+              devLog('작성일 추출 성공 (JSON-LD):', publishedDate);
+              return false; // break
+            }
+            if (jsonData.dateCreated) {
+              publishedDate = jsonData.dateCreated;
+              devLog('작성일 추출 성공 (JSON-LD dateCreated):', publishedDate);
+              return false; // break
+            }
+          } catch {
+            // JSON 파싱 실패는 무시
+          }
+        });
+      }
+
+      // 정규식으로 HTML에서 날짜 패턴 찾기
+      if (!publishedDate) {
+        const datePatterns = [
+          /"datePublished":\s*"([^"]+)"/,
+          /"publishDate":\s*"([^"]+)"/,
+          /data-publish-date="([^"]+)"/,
+          /datetime="([^"]+)"/,
+          /"date":\s*"([^"]+)"/
+        ];
+
+        for (const pattern of datePatterns) {
+          const match = html.match(pattern);
+          if (match && match[1]) {
+            publishedDate = match[1];
+            devLog('작성일 추출 성공 (패턴 매칭):', publishedDate);
+            break;
+          }
+        }
+      }
+
+      const articleNumber = parseInt(url.split('/').pop() || '0', 10);
+
       const articleData: ArticleData = {
         title: title.trim(),
         content: content.trim(),
         url,
-        number: parseInt(url.split('/').pop() || '0', 10),
+        number: articleNumber,
         success: true,
         publishedDate: publishedDate || undefined,
       };
 
-      devLog(`글 스크래핑 완료: ${title}`);
+      devLog(`글 파싱 완료: ${title} (${content.length} chars)`);
       return articleData;
 
     } catch (error) {
+      devLog(`HTML 파싱 실패:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 브런치 글 존재 여부 확인
+   */
+  async checkArticleExists(url: string): Promise<boolean> {
+    try {
+      devLog(`글 존재 확인: ${url}`);
+      const html = await this.fetchHtml(url);
+      
+      // 간단한 존재 여부 확인
+      const $ = cheerio.load(html);
+      
+      // 404 페이지 확인
+      if ($('title').text().includes('404') || 
+          $('.error').length > 0 || 
+          $('body').text().includes('존재하지 않는') ||
+          $('body').text().includes('페이지를 찾을 수 없습니다')) {
+        devLog('글이 존재하지 않음');
+        return false;
+      }
+
+      // 제목이나 내용 존재 확인
+      const hasTitle = $(CSS_SELECTORS.TITLE).length > 0 || $('.cover_title').length > 0;
+      const hasContent = $(CSS_SELECTORS.CONTENT).length > 0 || $('.wrap_body').length > 0;
+      
+      const exists = hasTitle && hasContent;
+      devLog(`글 존재 여부: ${exists}`);
+      return exists;
+      
+    } catch (error) {
+      devLog(`글 확인 실패: ${url}`, error);
+      return false;
+    }
+  }
+
+  /**
+   * 단일 브런치 글 스크래핑
+   */
+  async scrapeArticle(url: string): Promise<ArticleData | null> {
+    try {
+      devLog(`글 스크래핑 시작: ${url}`);
+      
+      const html = await this.fetchHtml(url);
+      const articleData = this.parseArticleData(html, url);
+      
+      if (articleData) {
+        devLog(`글 스크래핑 완료: ${articleData.title}`);
+      } else {
+        devLog(`글 스크래핑 실패: 데이터 추출 불가`);
+      }
+      
+      return articleData;
+      
+    } catch (error) {
       devLog(`글 스크래핑 실패 ${url}:`, error);
       return null;
-    } finally {
-      if (page) {
-        await page.close();
-      }
     }
   }
 }
@@ -311,10 +313,9 @@ export async function checkBrunchAccessibility(): Promise<{
   const scraper = new BrunchScraper();
   
   try {
-    await scraper.initialize();
-    
     // 테스트용 브런치 메인 페이지 접근
-    await scraper.checkArticleExists('https://brunch.co.kr');
+    const testUrl = 'https://brunch.co.kr';
+    await scraper.checkArticleExists(testUrl);
     
     return {
       accessible: true,
@@ -325,8 +326,6 @@ export async function checkBrunchAccessibility(): Promise<{
       accessible: false,
       error: `브런치 사이트 접근 실패: ${error}`,
     };
-  } finally {
-    await scraper.cleanup();
   }
 }
 
@@ -342,8 +341,6 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
   const startTime = Date.now();
 
   try {
-    await scraper.initialize();
-
     const totalArticles = endNum - startNum + 1;
     let processedCount = 0;
 
@@ -387,7 +384,7 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
           await onProgress(processedCount, totalArticles, url, `완료: ${title}`);
         }
 
-        // 요청 간 지연
+        // 요청 간 지연 (서버 부하 방지)
         if (articleNumber < endNum) {
           await new Promise(resolve => setTimeout(resolve, 2500)); // 2.5초 지연
         }
@@ -421,12 +418,10 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
       skippedUrls,
       processingTime: Date.now() - startTime,
     };
-  } finally {
-    await scraper.cleanup();
   }
 }
 
 // 기본 스크래퍼 인스턴스 생성 함수
-export function createScraper(settings?: Partial<ScrapingSettings>): BrunchScraper {
-  return new BrunchScraper(settings);
+export function createScraper(): BrunchScraper {
+  return new BrunchScraper();
 }

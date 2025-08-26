@@ -1,14 +1,9 @@
 {
-  "buildCommand": "npm run build",
-  "installCommand": "npm install && npx playwright-chromium install chromium --force && npx playwright install-deps",
   "functions": {
     "src/app/api/scrape/route.ts": {
       "maxDuration": 300,
-      "memory": 1024
+      "memory": 512
     }
   },
-  "regions": ["icn1"],
-  "env": {
-    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "false"
-  }
+  "regions": ["icn1"]
 }
