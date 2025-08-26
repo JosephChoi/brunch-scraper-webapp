@@ -2,7 +2,7 @@
  * 브런치 텍스트 수집기 - Playwright 스크래핑 엔진
  */
 
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, Browser, Page, BrowserContext } from 'playwright-chromium';
 import {
   ScrapeConfig,
   ScrapeResult,
