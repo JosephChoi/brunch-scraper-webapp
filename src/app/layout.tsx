@@ -58,20 +58,13 @@ export const metadata: Metadata = {
     description: "브런치 글을 쉽게 수집하고 텍스트 파일로 다운로드하세요",
     type: "website",
     locale: "ko_KR",
-    images: [
-      {
-        url: "/brunch logo.jpg",
-        width: 1200,
-        height: 630,
-        alt: "브런치 텍스트 수집기",
-      }
-    ],
+    siteName: "브런치 텍스트 수집기",
   },
   twitter: {
     card: "summary_large_image",
     title: "브런치 텍스트 수집기",
     description: "브런치 글을 쉽게 수집하고 텍스트 파일로 다운로드하세요",
-    images: ["/brunch logo.jpg"],
+    creator: "@josephchoi",
   },
 };
 

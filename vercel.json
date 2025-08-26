@@ -1,19 +1,8 @@
 {
-  "version": 2,
-  "name": "brunch-scraper-webapp",
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
   "functions": {
     "src/app/api/scrape/route.ts": {
       "maxDuration": 300
     }
   },
-  "regions": ["icn1"],
-  "env": {
-    "NODE_ENV": "production"
-  }
+  "regions": ["icn1"]
 }
