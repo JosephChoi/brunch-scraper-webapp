@@ -2,7 +2,8 @@
  * 브런치 텍스트 수집기 - Puppeteer 스크래핑 엔진 (Vercel 최적화)
  */
 
-import puppeteer, { Browser, Page } from 'puppeteer';
+import puppeteer, { Browser, Page } from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 import {
   ScrapeConfig,
   PuppeteerScrapeResult,
@@ -37,25 +38,47 @@ export class PuppeteerBrunchScraper {
     try {
       devLog('브라우저 초기화 시작...');
 
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--memory-pressure-off',
-        ],
-        timeout: NETWORK_SETTINGS.BROWSER_TIMEOUT,
-      });
+      // Vercel/AWS Lambda 환경 감지
+      const isVercel = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+      
+      if (isVercel) {
+        devLog('Vercel/AWS Lambda 환경에서 chrome-aws-lambda 사용');
+        
+        // @sparticuz/chromium 사용 (Vercel/AWS Lambda)
+        this.browser = await puppeteer.launch({
+          args: [
+            ...chromium.args,
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+          ],
+          defaultViewport: chromium.defaultViewport,
+          executablePath: await chromium.executablePath(),
+          headless: chromium.headless,
+          ignoreHTTPSErrors: true,
+        });
+      } else {
+        devLog('로컬 환경에서 일반 Puppeteer 사용');
+        
+        // 로컬 개발 환경
+        this.browser = await puppeteer.launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+          ],
+          timeout: NETWORK_SETTINGS.BROWSER_TIMEOUT,
+        });
+      }
 
       devLog('브라우저 초기화 완료');
     } catch (error) {

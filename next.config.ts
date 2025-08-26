@@ -26,7 +26,7 @@ const nextConfig: NextConfig = {
   },
   
   // 서버 외부 패키지 설정 (Vercel에서 Puppeteer 최적화)
-  serverExternalPackages: ['puppeteer'],
+  serverExternalPackages: ['puppeteer-core', '@sparticuz/chromium'],
 };
 
 export default nextConfig;
