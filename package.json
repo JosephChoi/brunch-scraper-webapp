@@ -11,12 +11,12 @@
     "type-check": "tsc --noEmit",
     "test": "playwright test",
     "test:ui": "playwright test --ui",
-    "playwright:install": "playwright install"
+    "playwright:install": "playwright install",
+    "postinstall": "npx playwright-chromium install chromium"
   },
   "dependencies": {
     "next": "15.5.0",
-    "puppeteer-core": "^22.0.0",
-    "@sparticuz/chromium": "^131.0.0",
+    "playwright-chromium": "^1.55.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
@@ -29,7 +29,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.0",
-    "puppeteer": "^22.0.0",
+
     "tailwindcss": "^4",
     "typescript": "^5"
   }

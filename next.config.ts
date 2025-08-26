@@ -25,8 +25,17 @@ const nextConfig: NextConfig = {
     ];
   },
   
-  // 서버 외부 패키지 설정 (Vercel에서 Puppeteer 최적화)
-  serverExternalPackages: ['puppeteer-core', '@sparticuz/chromium'],
+  // 서버 외부 패키지 설정 (Vercel에서 Playwright 최적화)
+  serverExternalPackages: ['playwright-chromium'],
+  
+  // 웹팩 설정 (Vercel Playwright 지원)
+  webpack: (config: any) => {
+    config.externals = config.externals || [];
+    config.externals.push({
+      'playwright-chromium': 'commonjs playwright-chromium'
+    });
+    return config;
+  },
 };
 
 export default nextConfig;

@@ -1,5 +1,5 @@
 /**
- * 브런치 텍스트 수집기 - Puppeteer 기반 스크래핑 API Route
+ * 브런치 텍스트 수집기 - 스크래핑 API Route
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -15,7 +15,10 @@ import {
   validateScrapeRequest,
   toValidationResponse,
 } from '@/lib/validator';
-import { createScraper } from '@/lib/scraper-puppeteer';
+import {
+  scrapeMultipleArticles,
+  checkBrunchAccessibility,
+} from '@/lib/scraper';
 import {
   processArticlesForDownload,
   generateTextFilename,
@@ -200,8 +203,26 @@ export async function POST(request: NextRequest) {
 
     const { authorId, baseUrl, startNum, endNum } = validation.parsed!;
 
+    // 브런치 접근 가능성 사전 확인
+    devLog('브런치 접근성 확인 중...');
+    const accessibilityCheck = await checkBrunchAccessibility();
+    if (!accessibilityCheck.accessible) {
+      const errorResponse: ErrorResponse = {
+        type: 'error',
+        error: ERROR_CODES.NETWORK_ERROR,
+        message: '브런치 사이트에 접근할 수 없습니다.',
+        details: accessibilityCheck.error,
+        timestamp: getCurrentTimestamp(),
+      };
+
+      return NextResponse.json(errorResponse, {
+        status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      });
+    }
+
     // 스트리밍 응답 시작
     return createStreamingResponse(async (writer) => {
+
       // 스크래핑 설정
       const scrapeConfig: ScrapeConfig = {
         baseUrl,
@@ -210,80 +231,89 @@ export async function POST(request: NextRequest) {
         endNum,
         startNumber: startNum,
         endNumber: endNum,
+        onProgress: async (current: number, total: number, url: string, title?: string) => {
+          const progressResponse: ProgressResponse = {
+            type: 'progress',
+            current,
+            total,
+            url,
+            title,
+            timestamp: getCurrentTimestamp(),
+          };
+
+          await writer.write(progressResponse);
+          devLog(`진행 상황: ${current}/${total} - ${url}`);
+        },
       };
 
-      devLog(`Puppeteer 스크래핑 시작: ${authorId}, ${startNum}-${endNum}`);
-
-      // Puppeteer 스크래퍼 생성
-      const scraper = createScraper();
-
       try {
-        // 스크래핑 실행 (Generator 방식)
-        for await (const result of scraper.scrapeArticles(scrapeConfig)) {
-          if (result.type === 'progress') {
-            const progressResponse: ProgressResponse = {
-              type: 'progress',
-              current: result.data.current,
-              total: result.data.total,
-              url: `${baseUrl}/${result.data.currentArticle}`,
-              title: result.data.status,
-              timestamp: getCurrentTimestamp(),
-            };
-            await writer.write(progressResponse);
-            devLog(`진행 상황: ${result.data.current}/${result.data.total} - ${result.data.status}`);
+        devLog(`스크래핑 시작: ${authorId}, ${startNum}-${endNum}`);
 
-          } else if (result.type === 'complete') {
-            devLog(`스크래핑 완료: ${result.data.articles.length}개 글 수집`);
+        // 스크래핑 실행
+        const scrapeResult = await scrapeMultipleArticles(scrapeConfig);
 
-            // 텍스트 처리
-            const processedText = processArticlesForDownload(
-              result.data.articles,
-              authorId,
-              startNum,
-              endNum
-            );
+        if (!scrapeResult.success) {
+          const errorResponse: ErrorResponse = {
+            type: 'error',
+            error: ERROR_CODES.SCRAPING_ERROR,
+            message: ERROR_MESSAGES[ERROR_CODES.SCRAPING_ERROR],
+            details: scrapeResult.error,
+            timestamp: getCurrentTimestamp(),
+          };
 
-            // 파일명 생성
-            const filename = generateTextFilename(authorId, startNum, endNum);
-
-            // 완료 응답 전송
-            const completeResponse: CompleteResponse = {
-              type: 'complete',
-              data: {
-                content: processedText.content,
-                filename,
-                metadata: {
-                  totalArticles: result.data.summary.total,
-                  successCount: result.data.summary.success,
-                  skippedCount: result.data.summary.failed,
-                  skippedUrls: result.data.summary.errors,
-                  generatedAt: getCurrentTimestamp(),
-                  authorId,
-                  range: `${startNum}-${endNum}`,
-                }
-              },
-              timestamp: getCurrentTimestamp(),
-            };
-
-            await writer.write(completeResponse);
-            devLog('스크래핑 및 전송 완료');
-            break;
-
-          } else if (result.type === 'error') {
-            const errorResponse: ErrorResponse = {
-              type: 'error',
-              error: ERROR_CODES.SCRAPING_ERROR,
-              message: result.data.message,
-              details: result.data.code,
-              timestamp: getCurrentTimestamp(),
-            };
-            await writer.write(errorResponse);
-            break;
-          }
+          await writer.write(errorResponse);
+          return;
         }
 
+        if (!scrapeResult.data || scrapeResult.data.length === 0) {
+          const errorResponse: ErrorResponse = {
+            type: 'error',
+            error: ERROR_CODES.PROCESSING_ERROR,
+            message: '수집된 데이터가 없습니다.',
+            timestamp: getCurrentTimestamp(),
+          };
+
+          await writer.write(errorResponse);
+          return;
+        }
+
+        devLog(`스크래핑 완료: ${scrapeResult.data.length}개 글 수집`);
+
+        // 텍스트 처리
+        const processedText = processArticlesForDownload(
+          scrapeResult.data,
+          authorId,
+          startNum,
+          endNum
+        );
+
+        // 파일명 생성
+        const filename = generateTextFilename(authorId, startNum, endNum);
+
+        // 완료 응답 전송
+        const completeResponse: CompleteResponse = {
+          type: 'complete',
+          data: {
+            content: processedText.content,
+            filename,
+            metadata: {
+              totalArticles: endNum - startNum + 1,
+              successCount: scrapeResult.data.length,
+              skippedCount: (endNum - startNum + 1) - scrapeResult.data.length,
+              skippedUrls: scrapeResult.skippedUrls || [],
+              generatedAt: getCurrentTimestamp(),
+              authorId,
+              range: `${startNum}-${endNum}`,
+            }
+          },
+          timestamp: getCurrentTimestamp(),
+        };
+
+        await writer.write(completeResponse);
+        devLog('스크래핑 및 전송 완료');
+
       } catch (error) {
-        devLog('Puppeteer 스크래핑 중 오류:', error);
+        devLog('스크래핑 중 오류:', error);
         
         const errorResponse: ErrorResponse = {
           type: 'error',
