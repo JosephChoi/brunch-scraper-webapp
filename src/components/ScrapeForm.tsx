@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button, Input, Alert } from './ui';
 import { ScrapeRequest, FieldError } from '@/lib/types';
-import { isValidBrunchUrl, isPositiveInteger } from '@/lib/utils';
+import { isValidBrunchUrl } from '@/lib/utils';
 
 export interface ScrapeFormProps {
   /** 폼 제출 콜백 */
@@ -36,8 +36,8 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
     endNum: '',
   });
 
-  // 검증 에러 상태
-  const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
+  // 검증 에러 상태 (예비용)
+  // const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
 
   // 폼 검증 함수
   const validateForm = (data: typeof formData): FieldError[] => {
@@ -87,10 +87,10 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
     return errors;
   };
 
-  // 특정 필드의 에러 메시지 가져오기
-  const getFieldError = (field: string): string | undefined => {
-    return fieldErrors.find(error => error.field === field)?.message;
-  };
+  // 특정 필드의 에러 메시지 가져오기 (예비용)
+  // const getFieldError = (field: string): string | undefined => {
+  //   return fieldErrors.find(error => error.field === field)?.message;
+  // };
 
   // 입력값 변경 핸들러
   const handleInputChange = (field: string, value: string) => {
@@ -99,8 +99,8 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
       [field]: value,
     }));
 
-    // 해당 필드의 에러 제거
-    setFieldErrors(prev => prev.filter(error => error.field !== field));
+    // 해당 필드의 에러 제거 (예비용)
+    // setFieldErrors(prev => prev.filter(error => error.field !== field));
   };
 
   // 수집 시작 핸들러
@@ -109,12 +109,13 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
     const errors = validateForm(formData);
     
     if (errors.length > 0) {
-      setFieldErrors(errors);
+      // setFieldErrors(errors); // 예비용
+      console.log('검증 에러:', errors);
       return;
     }
 
-    // 에러 초기화 후 제출
-    setFieldErrors([]);
+    // 에러 초기화 후 제출 (예비용)
+    // setFieldErrors([]);
     onSubmit({
       url: formData.url.trim(),
       startNum: parseInt(formData.startNum),
@@ -154,7 +155,7 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
       ...prev,
       url: 'https://brunch.co.kr/@ssoojeenlee',
     }));
-    setFieldErrors(prev => prev.filter(error => error.field !== 'url'));
+    // setFieldErrors(prev => prev.filter(error => error.field !== 'url')); // 예비용
   };
 
   return (

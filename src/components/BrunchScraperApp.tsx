@@ -4,7 +4,8 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
+import Image from 'next/image';
 import { ScrapeForm, ProgressBar, DownloadButton } from '@/components';
 import { Card } from '@/components/ui';
 import { useBrunchScraper } from '@/hooks';
@@ -62,9 +63,11 @@ export function BrunchScraperApp({ className }: BrunchScraperAppProps) {
       <div className="text-center space-y-6">
         {/* 브런치 로고 */}
         <div className="flex justify-center">
-          <img 
+          <Image 
             src="/brunch logo.jpg" 
             alt="브런치 로고" 
+            width={200}
+            height={64}
             className="h-16 w-auto object-contain"
           />
         </div>

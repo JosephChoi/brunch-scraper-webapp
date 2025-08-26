@@ -1,0 +1,19 @@
+# Vercel 배포 시 제외할 파일들
+*.test.ts
+*.test.js
+test-results/
+playwright-report/
+playwright/.cache/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Development files
+src/lib/__tests__/
+src/lib/__examples__/
+
+# Large files that are not needed in production
+public/*.png
+public/*.jpg
+!public/brunch logo.jpg

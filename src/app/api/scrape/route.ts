@@ -153,8 +153,6 @@ function createStreamingResponse(
 
   const stream = new ReadableStream({
     async start(controller) {
-      const writer = controller;
-      
       try {
         await onStream({
           write: (chunk: StreamResponse) => {
@@ -284,8 +282,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // 스트리밍 응답 시작
     return createStreamingResponse(async (writer) => {
-      const totalArticles = endNum - startNum + 1;
-      let processedCount = 0;
 
       // 스크래핑 설정
       const scrapeConfig: ScrapeConfig = {
@@ -294,8 +290,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         startNum,
         endNum,
         onProgress: async (current: number, total: number, url: string, title?: string) => {
-          processedCount = current;
-          
           const progressResponse: ProgressResponse = {
             type: 'progress',
             current,

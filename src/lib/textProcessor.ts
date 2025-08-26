@@ -13,7 +13,6 @@ import {
   generateFilename,
   getCurrentTimestamp,
   truncateString,
-  devLog,
 } from './utils';
 import {
   ARTICLE_SEPARATOR,
@@ -416,9 +415,9 @@ export function generateFooter(articles: ArticleData[]): string {
  */
 export function processArticlesForDownload(
   articles: ArticleData[],
-  authorId: string,
-  startNum: number,
-  endNum: number
+  _authorId: string, // eslint-disable-line @typescript-eslint/no-unused-vars
+  _startNum: number, // eslint-disable-line @typescript-eslint/no-unused-vars
+  _endNum: number // eslint-disable-line @typescript-eslint/no-unused-vars
 ): ProcessedText {
   const processingStartTime = Date.now();
 

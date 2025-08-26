@@ -195,7 +195,7 @@ export function useBrunchScraper(options: UseBrunchScraperOptions = {}): UseBrun
             
             if (errorData.fieldErrors && errorData.fieldErrors.length > 0) {
               console.log('=== 필드별 에러 분석 ===');
-              errorData.fieldErrors.forEach((fieldError: any, index: number) => {
+              errorData.fieldErrors.forEach((fieldError: { field: string; message: string }, index: number) => {
                 console.log(`${index + 1}. 필드: ${fieldError.field}, 메시지: ${fieldError.message}`);
               });
             }

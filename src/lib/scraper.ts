@@ -13,7 +13,6 @@ import {
 import {
   buildBrunchUrl,
   delay,
-  getCurrentTimestamp,
   stripHtmlTags,
   normalizeWhitespace,
   getErrorMessage,
@@ -25,7 +24,6 @@ import {
   NETWORK_IDLE_TIMEOUT,
   DEFAULT_HEADERS,
   REQUEST_DELAY_MS,
-  REQUEST_TIMEOUT_MS,
 } from './constants';
 
 // ===== 브라우저 관리 클래스 =====
@@ -229,7 +227,7 @@ export async function scrapeArticle(page: Page, url: string): Promise<ArticleDat
               break;
             }
           }
-        } catch (selectorError) {
+        } catch {
           // 개별 셀렉터 오류는 무시하고 다음 시도
           continue;
         }
@@ -543,7 +541,7 @@ export async function checkArticleExists(url: string): Promise<{
         title = await titleElement.textContent() || '';
         title = normalizeWhitespace(stripHtmlTags(title));
       }
-    } catch (error) {
+    } catch {
       // 제목 추출 실패해도 존재하는 것으로 판단
     }
 
