@@ -98,7 +98,7 @@ export function BrunchScraperApp({ className }: BrunchScraperAppProps) {
         )}
 
         {/* 진행 상황 표시 */}
-        {(isLoading || progress) && (
+        {(isLoading || (progress && state !== 'completed')) && (
           <Card className="p-6">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -202,8 +202,20 @@ export function BrunchScraperApp({ className }: BrunchScraperAppProps) {
                 </div>
                 <div className="flex-1">
                   <h3 className="text-sm font-medium text-green-800 dark:text-green-200">
-                    수집이 완료되었습니다!
+                    수집이 완료되었습니다! (100%)
                   </h3>
+                  
+                  {/* 완료된 진행률 바 */}
+                  <div className="mt-3 mb-3">
+                    <ProgressBar
+                      current={result.metadata.totalArticles}
+                      total={result.metadata.totalArticles}
+                      currentUrl="완료"
+                      currentTitle="모든 글 수집 완료"
+                      className="w-full"
+                    />
+                  </div>
+                  
                   <div className="mt-2 text-sm text-green-700 dark:text-green-300 space-y-1">
                     <p>
                       <span className="font-medium">작가:</span> {result.metadata.authorId}

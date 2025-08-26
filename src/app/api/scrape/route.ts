@@ -19,6 +19,7 @@ import {
   scrapeMultipleArticles,
   checkBrunchAccessibility,
 } from '@/lib/scraper';
+import { prepareBrowser } from '@/lib/browser-installer';
 import {
   processArticlesForDownload,
   generateTextFilename,
@@ -202,6 +203,26 @@ export async function POST(request: NextRequest) {
     }
 
     const { authorId, baseUrl, startNum, endNum } = validation.parsed!;
+
+    // Vercel 환경에서 브라우저 준비 확인
+    if (process.env.VERCEL) {
+      devLog('Vercel 환경에서 브라우저 준비 확인 중...');
+      const browserReady = await prepareBrowser();
+      if (!browserReady) {
+        const errorResponse: ErrorResponse = {
+          type: 'error',
+          error: ERROR_CODES.INTERNAL_ERROR,
+          message: 'Vercel 환경에서 브라우저 설치에 실패했습니다.',
+          details: 'Playwright Chromium 브라우저를 준비할 수 없습니다.',
+          timestamp: getCurrentTimestamp(),
+        };
+
+        return NextResponse.json(errorResponse, {
+          status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+        });
+      }
+      devLog('Vercel 환경에서 브라우저 준비 완료');
+    }
 
     // 브런치 접근 가능성 사전 확인
     devLog('브런치 접근성 확인 중...');

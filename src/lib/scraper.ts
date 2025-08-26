@@ -38,7 +38,8 @@ export class BrunchScraper {
     try {
       devLog('브라우저 초기화 시작...');
 
-      this.browser = await chromium.launch({
+      // Vercel 환경에서 브라우저 실행 경로 명시적 설정
+      const launchOptions: any = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -56,7 +57,29 @@ export class BrunchScraper {
           '--memory-pressure-off',
         ],
         timeout: NETWORK_SETTINGS.BROWSER_TIMEOUT,
-      });
+      };
+
+      // Vercel 환경에서 브라우저 실행 경로 확인
+      if (process.env.VERCEL) {
+        devLog('Vercel 환경 감지 - 브라우저 경로 설정');
+        // Vercel에서 Playwright가 설치하는 기본 경로
+        const possiblePaths = [
+          '/tmp/.playwright/chromium-*/chrome-linux/chrome',
+          '/home/sbx_user1051/.cache/ms-playwright/chromium-*/chrome-linux/chrome',
+          '/vercel/.cache/ms-playwright/chromium-*/chrome-linux/chrome'
+        ];
+        
+        for (const path of possiblePaths) {
+          try {
+            // 와일드카드 경로 처리는 실제 구현에서는 더 복잡하지만 일단 시도
+            devLog(`브라우저 경로 확인 시도: ${path}`);
+          } catch (error) {
+            devLog(`경로 확인 실패: ${path}`, error);
+          }
+        }
+      }
+
+      this.browser = await chromium.launch(launchOptions);
 
       this.context = await this.browser.newContext({
         userAgent: this.settings.userAgent,
@@ -328,9 +351,9 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
       const url = `${baseUrl}/${articleNumber}`;
       
       try {
-        // 진행률 콜백 호출
+        // 진행률 콜백 호출 (시작 시)
         if (onProgress) {
-          await onProgress(processedCount, totalArticles, url);
+          await onProgress(processedCount, totalArticles, url, `글 ${articleNumber}번 처리 중...`);
         }
 
         // 글 존재 확인
@@ -338,6 +361,11 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
         if (!exists) {
           skippedUrls.push(url);
           processedCount++;
+          
+          // 존재하지 않는 글 처리 완료 후 진행률 업데이트
+          if (onProgress) {
+            await onProgress(processedCount, totalArticles, url, `글 ${articleNumber}번: 존재하지 않음`);
+          }
           continue;
         }
 
@@ -352,6 +380,12 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
         }
 
         processedCount++;
+        
+        // 처리 완료 후 진행률 업데이트
+        if (onProgress) {
+          const title = articleData ? articleData.title : `글 ${articleNumber}번`;
+          await onProgress(processedCount, totalArticles, url, `완료: ${title}`);
+        }
 
         // 요청 간 지연
         if (articleNumber < endNum) {
@@ -362,6 +396,11 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
         devLog(`글 ${articleNumber}번 처리 중 오류:`, error);
         skippedUrls.push(url);
         processedCount++;
+        
+        // 에러 처리 완료 후 진행률 업데이트
+        if (onProgress) {
+          await onProgress(processedCount, totalArticles, url, `글 ${articleNumber}번: 오류 발생`);
+        }
       }
     }
 

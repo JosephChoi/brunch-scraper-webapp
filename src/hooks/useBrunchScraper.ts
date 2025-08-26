@@ -99,8 +99,19 @@ export function useBrunchScraper(options: UseBrunchScraperOptions = {}): UseBrun
             metadata: response.data.metadata,
           };
           
+          // 완료 시 진행률을 100%로 강제 설정
+          const finalProgress: ScrapingProgress = {
+            current: resultData.metadata.totalArticles,
+            total: resultData.metadata.totalArticles,
+            percentage: 100,
+            currentUrl: '완료',
+            currentTitle: '모든 글 수집 완료',
+          };
+          
+          setProgress(finalProgress);
           setResult(resultData);
           setState('completed');
+          onProgress?.(finalProgress);
           onComplete?.(resultData);
           devLog('스크래핑 완료:', resultData.metadata);
           break;

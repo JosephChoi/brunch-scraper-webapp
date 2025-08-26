@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run ensure-playwright && next build",
     "start": "next start",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -12,7 +12,8 @@
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "playwright:install": "playwright install",
-    "postinstall": "npx playwright-chromium install chromium"
+    "ensure-playwright": "npx playwright-chromium install chromium --force",
+    "postinstall": "npm run ensure-playwright"
   },
   "dependencies": {
     "next": "15.5.0",
