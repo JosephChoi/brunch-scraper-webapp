@@ -136,6 +136,46 @@ export function cleanBrunchText(text: string): string {
 }
 
 /**
+ * 형식이 보존된 브런치 텍스트를 정제합니다.
+ * HTML 형식 정보(줄바꿈, 문단 등)는 유지하면서 불필요한 요소만 제거합니다.
+ * @param text 형식이 보존된 원본 텍스트
+ * @returns 정제된 형식 보존 텍스트
+ */
+export function cleanFormattedBrunchText(text: string): string {
+  let result = text;
+
+  // HTML 엔티티 디코딩
+  result = decodeHtmlEntities(result);
+
+  // 특수 문자 정규화 (이모지는 보존)
+  result = normalizeSpecialCharacters(result, true);
+
+  // 브런치 특화 불필요한 텍스트 제거
+  result = removeBrunchMetadata(result);
+
+  // 연속된 공백 정리 (줄바꿈은 보존)
+  result = result.replace(/ {3,}/g, '  '); // 3개 이상 공백을 2개로
+  
+  // 연속된 줄바꿈 정리 (최대 2개까지만)
+  result = result.replace(/\n{3,}/g, '\n\n');
+  
+  // 줄 시작/끝의 불필요한 공백 제거
+  result = result.split('\n').map(line => line.trim()).join('\n');
+  
+  // 불릿 포인트 앞뒤 공백 정리
+  result = result.replace(/\n\s*•\s*/g, '\n• ');
+  
+  // 인용구 형식 정리
+  result = result.replace(/\n\s*>\s*/g, '\n> ');
+  
+  // 마크다운 강조 표시 정리
+  result = result.replace(/\*{3,}/g, '**'); // 3개 이상 별표를 2개로
+  result = result.replace(/`{2,}/g, '`');   // 2개 이상 백틱을 1개로
+
+  return result.trim();
+}
+
+/**
  * 브런치 특화 메타데이터나 불필요한 텍스트를 제거합니다.
  * @param text 원본 텍스트
  * @returns 정제된 텍스트
@@ -188,6 +228,7 @@ export function formatSingleArticle(
     includeMetadata?: boolean;
     titleMaxLength?: number;
     contentMaxLength?: number;
+    preserveFormatting?: boolean;
   } = {}
 ): string {
   const {
@@ -195,13 +236,14 @@ export function formatSingleArticle(
     includeMetadata = false,
     titleMaxLength = MAX_TITLE_LENGTH,
     contentMaxLength = MAX_CONTENT_LENGTH_PER_ARTICLE,
+    preserveFormatting = false,
   } = options;
 
   const parts: string[] = [];
 
   // 제목 추가
   if (includeTitle && article.title && article.title !== '(제목 없음)') {
-    let title = cleanBrunchText(article.title);
+    let title = preserveFormatting ? cleanFormattedBrunchText(article.title) : cleanBrunchText(article.title);
     
     if (title.length > titleMaxLength) {
       title = truncateString(title, titleMaxLength, '...');
@@ -212,7 +254,7 @@ export function formatSingleArticle(
 
   // 본문 추가
   if (article.content) {
-    let content = cleanBrunchText(article.content);
+    let content = preserveFormatting ? cleanFormattedBrunchText(article.content) : cleanBrunchText(article.content);
     
     if (content.length > contentMaxLength) {
       content = truncateString(content, contentMaxLength, '\n\n(내용이 너무 길어 일부만 표시됩니다...)');
@@ -257,6 +299,7 @@ export function mergeArticles(
     separateFailedArticles?: boolean;
     addHeader?: boolean;
     addFooter?: boolean;
+    preserveFormatting?: boolean;
   } = {}
 ): string {
   const {
@@ -265,6 +308,7 @@ export function mergeArticles(
     separateFailedArticles = true,
     addHeader = true,
     addFooter = true,
+    preserveFormatting = false,
   } = options;
 
   if (articles.length === 0) {
@@ -289,6 +333,7 @@ export function mergeArticles(
     let formattedArticle = formatSingleArticle(article, {
       includeTitle: true,
       includeMetadata,
+      preserveFormatting,
     });
 
     // 인덱스 추가
@@ -411,13 +456,15 @@ export function generateFooter(articles: ArticleData[]): string {
  * @param authorId 작가 ID
  * @param startNum 시작 번호
  * @param endNum 종료 번호
+ * @param preserveFormatting 형식 보존 여부
  * @returns 처리된 텍스트 결과
  */
 export function processArticlesForDownload(
   articles: ArticleData[],
-  _authorId: string, // eslint-disable-line @typescript-eslint/no-unused-vars
-  _startNum: number, // eslint-disable-line @typescript-eslint/no-unused-vars
-  _endNum: number // eslint-disable-line @typescript-eslint/no-unused-vars
+  _authorId: string,
+  _startNum: number,
+  _endNum: number,
+  preserveFormatting: boolean = false
 ): ProcessedText {
   const processingStartTime = Date.now();
 
@@ -428,6 +475,7 @@ export function processArticlesForDownload(
     separateFailedArticles: true,
     addHeader: true,
     addFooter: true,
+    preserveFormatting,
   });
 
   // 메타데이터 생성

@@ -71,9 +71,138 @@ export class BrunchScraper {
   }
 
   /**
+   * HTML 형식을 보존하면서 텍스트 추출
+   */
+  private extractFormattedText(element: any): string {
+    const $ = element.get ? cheerio.load(element.html() || '') : element;
+    
+    // HTML 요소를 순회하면서 형식 정보 보존
+    const convertHtmlToFormattedText = (elem: any): string => {
+      let result = '';
+      
+      elem.contents().each((_index: number, node: any) => {
+        const $node = $(node);
+        
+        if (node.type === 'text') {
+          // 텍스트 노드: 그대로 추가
+          const text = $node.text();
+          if (text.trim()) {
+            result += text;
+          }
+        } else if (node.type === 'tag') {
+          const tagName = node.tagName?.toLowerCase();
+          
+          switch (tagName) {
+            case 'p':
+            case 'div':
+              // 문단: 앞뒤로 줄바꿈 추가
+              const pContent = convertHtmlToFormattedText($node);
+              if (pContent.trim()) {
+                result += '\n\n' + pContent.trim() + '\n\n';
+              }
+              break;
+              
+            case 'br':
+              // 줄바꿈: 단일 줄바꿈 추가
+              result += '\n';
+              break;
+              
+            case 'h1':
+            case 'h2':
+            case 'h3':
+            case 'h4':
+            case 'h5':
+            case 'h6':
+              // 제목: 앞뒤로 줄바꿈 추가
+              const hContent = convertHtmlToFormattedText($node);
+              if (hContent.trim()) {
+                result += '\n\n' + hContent.trim() + '\n\n';
+              }
+              break;
+              
+            case 'li':
+              // 리스트 아이템: 앞에 줄바꿈과 불릿 추가
+              const liContent = convertHtmlToFormattedText($node);
+              if (liContent.trim()) {
+                result += '\n• ' + liContent.trim();
+              }
+              break;
+              
+            case 'ul':
+            case 'ol':
+              // 리스트: 앞뒤로 줄바꿈 추가
+              const listContent = convertHtmlToFormattedText($node);
+              if (listContent.trim()) {
+                result += '\n' + listContent.trim() + '\n';
+              }
+              break;
+              
+            case 'blockquote':
+              // 인용구: 앞뒤로 줄바꿈과 인용 표시 추가
+              const quoteContent = convertHtmlToFormattedText($node);
+              if (quoteContent.trim()) {
+                const quotedLines = quoteContent.trim().split('\n').map(line => '> ' + line).join('\n');
+                result += '\n\n' + quotedLines + '\n\n';
+              }
+              break;
+              
+            case 'strong':
+            case 'b':
+              // 굵은 글씨: 강조 표시로 감싸기
+              const strongContent = convertHtmlToFormattedText($node);
+              if (strongContent.trim()) {
+                result += '**' + strongContent.trim() + '**';
+              }
+              break;
+              
+            case 'em':
+            case 'i':
+              // 기울임: 기울임 표시로 감싸기
+              const emContent = convertHtmlToFormattedText($node);
+              if (emContent.trim()) {
+                result += '*' + emContent.trim() + '*';
+              }
+              break;
+              
+            case 'code':
+              // 코드: 백틱으로 감싸기
+              const codeContent = convertHtmlToFormattedText($node);
+              if (codeContent.trim()) {
+                result += '`' + codeContent.trim() + '`';
+              }
+              break;
+              
+            case 'pre':
+              // 코드 블록: 앞뒤로 줄바꿈과 백틱 블록 추가
+              const preContent = convertHtmlToFormattedText($node);
+              if (preContent.trim()) {
+                result += '\n\n```\n' + preContent.trim() + '\n```\n\n';
+              }
+              break;
+              
+            default:
+              // 기타 태그: 내용만 추출
+              result += convertHtmlToFormattedText($node);
+              break;
+          }
+        }
+      });
+      
+      return result;
+    };
+    
+    const formatted = convertHtmlToFormattedText(element);
+    
+    // 연속된 줄바꿈 정리 (3개 이상을 2개로)
+    return formatted
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /**
    * Cheerio로 HTML 파싱 및 데이터 추출
    */
-  private parseArticleData(html: string, url: string): ArticleData | null {
+  private parseArticleData(html: string, url: string, preserveFormatting: boolean = false): ArticleData | null {
     try {
       const $ = cheerio.load(html);
 
@@ -123,12 +252,23 @@ export class BrunchScraper {
       for (const selector of contentSelectors) {
         const contentElements = $(selector);
         if (contentElements.length > 0) {
-          contentElements.each((_, element) => {
-            const text = $(element).text().trim();
-            if (text) {
-              content += text + '\n\n';
-            }
-          });
+          if (preserveFormatting) {
+            // HTML 형식 보존하면서 텍스트 추출
+            contentElements.each((_, element) => {
+              const formattedText = this.extractFormattedText($(element));
+              if (formattedText.trim()) {
+                content += formattedText + '\n\n';
+              }
+            });
+          } else {
+            // 기존 방식: 순수 텍스트만 추출
+            contentElements.each((_, element) => {
+              const text = $(element).text().trim();
+              if (text) {
+                content += text + '\n\n';
+              }
+            });
+          }
           
           if (content.trim()) {
             devLog(`내용 추출 성공 (${selector}): ${content.length} chars`);
@@ -281,12 +421,12 @@ export class BrunchScraper {
   /**
    * 단일 브런치 글 스크래핑
    */
-  async scrapeArticle(url: string): Promise<ArticleData | null> {
+  async scrapeArticle(url: string, preserveFormatting: boolean = false): Promise<ArticleData | null> {
     try {
       devLog(`글 스크래핑 시작: ${url}`);
       
       const html = await this.fetchHtml(url);
-      const articleData = this.parseArticleData(html, url);
+      const articleData = this.parseArticleData(html, url, preserveFormatting);
       
       if (articleData) {
         devLog(`글 스크래핑 완료: ${articleData.title}`);
@@ -333,7 +473,7 @@ export async function checkBrunchAccessibility(): Promise<{
  * 여러 브런치 글 스크래핑
  */
 export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<ScrapeResult> {
-  const { baseUrl, startNum, endNum, onProgress } = config;
+  const { baseUrl, startNum, endNum, preserveFormatting = false, onProgress } = config;
   const scraper = new BrunchScraper();
   const results: ArticleData[] = [];
   const skippedUrls: string[] = [];
@@ -367,7 +507,7 @@ export async function scrapeMultipleArticles(config: ScrapeConfig): Promise<Scra
         }
 
         // 글 스크래핑
-        const articleData = await scraper.scrapeArticle(url);
+        const articleData = await scraper.scrapeArticle(url, preserveFormatting);
         
         if (articleData) {
           results.push(articleData);

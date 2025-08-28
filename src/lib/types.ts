@@ -14,6 +14,8 @@ export interface ScrapeRequest {
   startNum: number;
   /** 종료 글 번호 (startNum 이상) */
   endNum: number;
+  /** HTML 형식 보존 여부 (기본값: false) */
+  preserveFormatting?: boolean;
 }
 
 /**
@@ -32,6 +34,8 @@ export interface ScrapeConfig {
   startNumber: number;
   /** Puppeteer용 종료 글 번호 */
   endNumber: number;
+  /** HTML 형식 보존 여부 (기본값: false) */
+  preserveFormatting?: boolean;
   /** 진행 상황 콜백 함수 */
   onProgress?: (current: number, total: number, url: string, title?: string) => void;
 }

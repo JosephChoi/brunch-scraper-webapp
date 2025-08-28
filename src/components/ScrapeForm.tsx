@@ -34,6 +34,7 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
     url: '',
     startNum: '',
     endNum: '',
+    preserveFormatting: false,
   });
 
   // 검증 에러 상태 (예비용)
@@ -93,7 +94,7 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
   // };
 
   // 입력값 변경 핸들러
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({
       ...prev,
       [field]: value,
@@ -120,6 +121,7 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
       url: formData.url.trim(),
       startNum: parseInt(formData.startNum),
       endNum: parseInt(formData.endNum),
+      preserveFormatting: formData.preserveFormatting,
     });
   };
 
@@ -249,6 +251,27 @@ export const ScrapeForm: React.FC<ScrapeFormProps> = ({
               disabled={disabled || loading}
               helperText="수집을 종료할 글 번호"
             />
+          </div>
+
+          {/* 형식 보존 옵션 */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                id="preserveFormatting"
+                checked={formData.preserveFormatting}
+                onChange={(e) => handleInputChange('preserveFormatting', e.target.checked)}
+                disabled={disabled || loading}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label htmlFor="preserveFormatting" className="text-sm font-medium text-gray-700 cursor-pointer">
+                HTML 형식 보존 (문단 구분, 줄바꿈, 강조 등)
+              </label>
+            </div>
+            <div className="ml-7 text-xs text-gray-500">
+              <p>체크하면 원본 글의 문단 구분, 줄바꿈, 강조 표시(굵게, 기울임) 등의 형식이 보존됩니다.</p>
+              <p className="mt-1">체크하지 않으면 순수 텍스트만 추출됩니다.</p>
+            </div>
           </div>
 
           {/* 수집 정보 표시 */}

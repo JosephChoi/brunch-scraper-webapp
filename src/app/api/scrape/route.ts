@@ -203,6 +203,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { authorId, baseUrl, startNum, endNum } = validation.parsed!;
+    const { preserveFormatting = false } = requestBody;
 
     // HTTP 스크래핑을 위한 네트워크 접근성 확인
     devLog('브런치 사이트 접근성 확인 중...');
@@ -235,6 +236,7 @@ export async function POST(request: NextRequest) {
         endNum,
         startNumber: startNum,
         endNumber: endNum,
+        preserveFormatting,
         onProgress: async (current: number, total: number, url: string, title?: string) => {
           const progressResponse: ProgressResponse = {
             type: 'progress',
@@ -288,7 +290,8 @@ export async function POST(request: NextRequest) {
           scrapeResult.data,
           authorId,
           startNum,
-          endNum
+          endNum,
+          preserveFormatting
         );
 
         // 파일명 생성
